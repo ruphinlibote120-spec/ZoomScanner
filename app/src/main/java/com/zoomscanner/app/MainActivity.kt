@@ -6,6 +6,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -106,18 +108,25 @@ fun Root() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val app = remember { AppState(ctx, scope) }
-    BackHandler(enabled = app.stack.size > 1) { app.back() }
+    var splash by remember { mutableStateOf(true) }
+    BackHandler(enabled = !splash && app.stack.size > 1) { app.back() }
 
-    Surface(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize()) {
-            when (val s = app.stack.last()) {
-                is Screen.Home -> HomeScreen(app)
-                is Screen.Viewer -> ViewerScreen(app, s.file)
-                is Screen.Pick -> PickScreen(app, s.tool)
-                is Screen.Work -> WorkScreen(app, s.tool, s.files)
+    Crossfade(targetState = splash, animationSpec = tween(400), label = "splash") { showing ->
+        if (showing) {
+            SplashScreen { splash = false }
+        } else {
+            Surface(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxSize()) {
+                    when (val s = app.stack.last()) {
+                        is Screen.Home -> HomeScreen(app)
+                        is Screen.Viewer -> ViewerScreen(app, s.file)
+                        is Screen.Pick -> PickScreen(app, s.tool)
+                        is Screen.Work -> WorkScreen(app, s.tool, s.files)
+                    }
+                    val msg = app.busy
+                    if (msg != null) BusyOverlay(msg)
+                }
             }
-            val msg = app.busy
-            if (msg != null) BusyOverlay(msg)
         }
     }
 }
