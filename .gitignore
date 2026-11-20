@@ -4,6 +4,4 @@
 /build/
 /app/build/
 .idea/
-*.keystore
-!debug.keystore
 .DS_Store
