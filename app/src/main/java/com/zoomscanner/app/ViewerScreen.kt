@@ -3,6 +3,9 @@ package com.zoomscanner.app
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -52,6 +55,8 @@ fun ViewerScreen(app: AppState, file: File) {
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    var moving by remember { mutableStateOf(false) }
+    var fav by remember(file.absolutePath) { mutableStateOf(Lib.isFav(ctx, file)) }
 
     val save = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/pdf")
@@ -78,7 +83,19 @@ fun ViewerScreen(app: AppState, file: File) {
                     IconButton(onClick = { app.back() }) { Text("←", fontSize = 22.sp) }
                 },
                 actions = {
-                    IconButton(onClick = { Lib.share(ctx, file) }) { Text("📤") }
+                    IconButton(onClick = {
+                        fav = Lib.toggleFav(ctx, file)
+                        app.refresh++
+                    }) {
+                        Glyph(
+                            "star",
+                            if (fav) Color(0xFFFBBF24) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            24.dp, 1.8f, filled = fav
+                        )
+                    }
+                    IconButton(onClick = { Lib.share(ctx, file) }) {
+                        Glyph("share", MaterialTheme.colorScheme.onSurface, 22.dp)
+                    }
                     Box {
                         IconButton(onClick = { menu = true }) { Text("⋮", fontSize = 22.sp) }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -104,7 +121,14 @@ fun ViewerScreen(app: AppState, file: File) {
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("Supprimer") },
+                                text = { Text("Déplacer vers un dossier") },
+                                onClick = {
+                                    menu = false
+                                    moving = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Mettre à la corbeille") },
                                 onClick = {
                                     menu = false
                                     deleting = true
@@ -125,13 +149,14 @@ fun ViewerScreen(app: AppState, file: File) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     val quick = listOf(
-                        Tool.OCR, Tool.SIGN, Tool.WATERMARK, Tool.LOCK, Tool.COMPRESS,
-                        Tool.EXTRACT, Tool.REORDER, Tool.PDF_TO_IMAGES, Tool.PDF_LONG
+                        Tool.OCR, Tool.ANNOTATE, Tool.STAMPS, Tool.PAGES,
+                        Tool.PASSWORD, Tool.COMPRESS, Tool.PDF_TO_IMAGES
                     )
                     for (t in quick) {
                         AssistChip(
                             onClick = { app.push(Screen.Work(t, listOf(file))) },
-                            label = { Text(t.icon + " " + t.label) }
+                            leadingIcon = { Glyph(t.icon, MaterialTheme.colorScheme.onSurface, 18.dp) },
+                            label = { Text(t.label) }
                         )
                     }
                 }
@@ -145,7 +170,7 @@ fun ViewerScreen(app: AppState, file: File) {
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "🔒 Ce document est protégé par un mot de passe.\nOuvrez-le avec une autre application (bouton Partager).",
+                        "🔒 Ce document est protégé par un mot de passe.\nTouchez « Mot de passe » ci-dessous pour le déverrouiller.",
                         textAlign = TextAlign.Center
                     )
                 }
@@ -184,15 +209,16 @@ fun ViewerScreen(app: AppState, file: File) {
                 TextButton(onClick = {
                     val target = File(file.parentFile, Lib.clean(name) + ".pdf")
                     renaming = false
-                    if (target != file && target.exists()) {
-                        app.toast("Ce nom existe déjà")
-                    } else if (target == file) {
+                    if (target == file) {
                         // rien à changer
-                    } else if (file.renameTo(target)) {
-                        app.refresh++
-                        app.replaceTop(Screen.Viewer(target))
                     } else {
-                        app.toast("Impossible de renommer")
+                        val done = Lib.rename(ctx, file, name)
+                        if (done == null) {
+                            app.toast("Ce nom existe déjà ou le fichier est introuvable")
+                        } else {
+                            app.refresh++
+                            app.replaceTop(Screen.Viewer(done))
+                        }
                     }
                 }) { Text("OK") }
             },
@@ -203,17 +229,62 @@ fun ViewerScreen(app: AppState, file: File) {
     if (deleting) {
         AlertDialog(
             onDismissRequest = { deleting = false },
-            title = { Text("Supprimer ce document ?") },
-            text = { Text("« ${file.nameWithoutExtension} » sera supprimé définitivement de ZoomScanner.") },
+            title = { Text("Mettre à la corbeille ?") },
+            text = { Text("« ${file.nameWithoutExtension} » ira dans la corbeille (Réglages). Vous pourrez le restaurer.") },
             confirmButton = {
                 TextButton(onClick = {
                     deleting = false
-                    file.delete()
+                    Lib.moveToTrash(ctx, file)
                     app.refresh++
                     app.back()
-                }) { Text("Supprimer") }
+                }) { Text("Mettre à la corbeille") }
             },
             dismissButton = { TextButton(onClick = { deleting = false }) { Text("Annuler") } }
+        )
+    }
+
+    if (moving) {
+        val folders = remember { Lib.folders(ctx) }
+        AlertDialog(
+            onDismissRequest = { moving = false },
+            title = { Text("Déplacer vers…") },
+            text = {
+                Column {
+                    Text(
+                        "Documents (racine)",
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            moving = false
+                            val moved = Lib.moveTo(ctx, file, null)
+                            if (moved != null) {
+                                app.refresh++
+                                app.replaceTop(Screen.Viewer(moved))
+                            }
+                        }.padding(vertical = 12.dp)
+                    )
+                    for (name in folders) {
+                        Text(
+                            name,
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                moving = false
+                                val moved = Lib.moveTo(ctx, file, name)
+                                if (moved != null) {
+                                    app.refresh++
+                                    app.replaceTop(Screen.Viewer(moved))
+                                }
+                            }.padding(vertical = 12.dp)
+                        )
+                    }
+                    if (folders.isEmpty()) {
+                        Text(
+                            "Aucun dossier : créez-en un depuis Documents > Dossiers.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { moving = false }) { Text("Annuler") } }
         )
     }
 }

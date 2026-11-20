@@ -323,4 +323,69 @@ object Pdf {
         }
         return parts
     }
+
+    // ---------- Retirer le mot de passe ----------
+
+    fun unlock(ctx: Context, src: File, out: File, password: String) {
+        init(ctx)
+        val doc = PDDocument.load(src, password)
+        try {
+            doc.isAllSecurityToBeRemoved = true
+            doc.save(out)
+        } finally {
+            doc.close()
+        }
+    }
+
+    // ---------- Texte sur chaque page (numéros, date, en-tête / pied de page) ----------
+
+    /**
+     * Écrit un texte sur chaque page. horizontal : 0 gauche, 1 centre, 2 droite.
+     * vertical : 0 en bas, 1 en haut. texts(numéro de page à partir de 1, nombre de pages) -> texte.
+     */
+    fun stampText(
+        ctx: Context, src: File, out: File, horizontal: Int, vertical: Int,
+        texts: (Int, Int) -> String
+    ) {
+        init(ctx)
+        val doc = PDDocument.load(src)
+        try {
+            val font = PDType1Font.HELVETICA
+            val size = 10f
+            val total = doc.numberOfPages
+            for (i in 0 until total) {
+                val page = doc.getPage(i)
+                val raw = texts(i + 1, total)
+                if (raw.isBlank()) continue
+                val txt = try {
+                    font.getStringWidth(raw)
+                    raw
+                } catch (e: Exception) {
+                    stripAccents(raw)
+                }
+                val tw = font.getStringWidth(txt) / 1000f * size
+                val box = page.mediaBox
+                val margin = 24f
+                val x = when (horizontal) {
+                    0 -> box.lowerLeftX + margin
+                    1 -> box.lowerLeftX + (box.width - tw) / 2f
+                    else -> box.lowerLeftX + box.width - tw - margin
+                }
+                val y = if (vertical == 0) box.lowerLeftY + margin else box.lowerLeftY + box.height - margin - size
+                PDPageContentStream(
+                    doc, page, PDPageContentStream.AppendMode.APPEND, true, true
+                ).use { cs ->
+                    cs.setNonStrokingColor(0, 0, 0)
+                    cs.beginText()
+                    cs.setFont(font, size)
+                    cs.newLineAtOffset(x, y)
+                    cs.showText(txt)
+                    cs.endText()
+                }
+            }
+            doc.save(out)
+        } finally {
+            doc.close()
+        }
+    }
 }

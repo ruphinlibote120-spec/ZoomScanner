@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -81,15 +82,13 @@ fun WorkScreen(app: AppState, tool: Tool, files: List<File>) {
             val f = files.first()
             when (tool) {
                 Tool.OCR -> OcrWork(app, f)
-                Tool.LOCK -> LockWork(app, f)
+                Tool.PASSWORD -> PasswordWork(app, f)
                 Tool.COMPRESS -> CompressWork(app, f)
-                Tool.WATERMARK -> WatermarkWork(app, f)
-                Tool.SIGN -> SignWork(app, f)
+                Tool.STAMPS -> StampsWork(app, f)
+                Tool.ANNOTATE -> SignWork(app, f)
                 Tool.MERGE -> MergeWork(app, files)
-                Tool.EXTRACT -> ExtractWork(app, f)
-                Tool.REORDER -> ReorderWork(app, f)
-                Tool.PDF_TO_IMAGES -> ToImagesWork(app, f, false)
-                Tool.PDF_LONG -> ToImagesWork(app, f, true)
+                Tool.PAGES -> ReorderWork(app, f)
+                Tool.PDF_TO_IMAGES -> ToImagesWork(app, f)
                 else -> Text("Outil indisponible", Modifier.padding(16.dp))
             }
         }
@@ -119,6 +118,7 @@ fun OcrWork(app: AppState, file: File) {
                 sb.append(t.trim()).append("\n\n")
             }
             text = sb.toString().trim().ifEmpty { "(Aucun texte détecté)" }
+            if (sb.isNotBlank()) Lib.saveText(ctx, file, sb.toString())
         } catch (e: Exception) {
             text = "Erreur : ${e.message ?: e.javaClass.simpleName}"
         }
@@ -542,37 +542,200 @@ fun ReorderWork(app: AppState, file: File) {
     }
 }
 
-// ---------------------------------------------------------------- PDF en images / image longue
+// ---------------------------------------------------------------- PDF en images (pages ou image longue)
 
 @Composable
-fun ToImagesWork(app: AppState, file: File, long: Boolean) {
+fun ToImagesWork(app: AppState, file: File) {
     val ctx = app.ctx
+    var long by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text(
-            if (long) "Toutes les pages seront collées les unes sous les autres en une image (ou plusieurs si le document est très long)."
-            else "Chaque page sera enregistrée comme une image.",
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(8.dp))
+        Text("Comment voulez-vous obtenir les images ?", fontWeight = FontWeight.Bold)
+        Row(
+            Modifier.fillMaxWidth().clickable { long = false },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(selected = !long, onClick = { long = false })
+            Text("Une image par page")
+        }
+        Row(
+            Modifier.fillMaxWidth().clickable { long = true },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(selected = long, onClick = { long = true })
+            Text("Une seule image longue (pages collées les unes sous les autres)")
+        }
         Text(
             "Les images iront dans la galerie, dossier « ZoomScanner ».",
-            textAlign = TextAlign.Center,
             style = MaterialTheme.typography.bodySmall
         )
-        Spacer(Modifier.height(24.dp))
-        Button(onClick = {
-            app.task("Conversion…") {
-                val n = withContext(Dispatchers.IO) {
-                    val progress = { i: Int, total: Int -> app.busy = "Page $i / $total…" }
-                    if (long) Pdf.pdfToLongImages(ctx, file, progress) else Pdf.pdfToImages(ctx, file, progress)
+        Spacer(Modifier.height(8.dp))
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = {
+                app.task("Conversion…") {
+                    val n = withContext(Dispatchers.IO) {
+                        val progress = { i: Int, total: Int -> app.busy = "Page $i / $total…" }
+                        if (long) Pdf.pdfToLongImages(ctx, file, progress) else Pdf.pdfToImages(ctx, file, progress)
+                    }
+                    app.toast("$n image(s) enregistrée(s) dans la galerie (ZoomScanner)")
+                    app.back()
                 }
-                app.toast("$n image(s) enregistrée(s) dans la galerie (ZoomScanner)")
-                app.back()
             }
-        }) { Text("Enregistrer dans la galerie") }
+        ) { Text("Enregistrer dans la galerie") }
+    }
+}
+
+// ---------------------------------------------------------------- Mot de passe (verrouiller ou déverrouiller)
+
+@Composable
+fun PasswordWork(app: AppState, file: File) {
+    val ctx = app.ctx
+    val count by produceState(0, file.absolutePath, file.lastModified()) {
+        value = withContext(Dispatchers.IO) { Pdf.pageCount(file) }
+    }
+    when {
+        count == 0 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        count < 0 -> UnlockWork(app, file)
+        else -> LockWork(app, file)
+    }
+}
+
+@Composable
+fun UnlockWork(app: AppState, file: File) {
+    val ctx = app.ctx
+    var pw by remember { mutableStateOf("") }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("Ce document est protégé. Entrez son mot de passe pour en créer une copie sans protection.")
+        OutlinedTextField(
+            value = pw, onValueChange = { pw = it },
+            label = { Text("Mot de passe") },
+            visualTransformation = PasswordVisualTransformation(),
+            singleLine = true, modifier = Modifier.fillMaxWidth()
+        )
+        Button(
+            enabled = pw.isNotEmpty(),
+            modifier = Modifier.fillMaxWidth(),
+            onClick = {
+                app.task("Déverrouillage…") {
+                    val out = Lib.derived(ctx, file, "déverrouillé")
+                    try {
+                        withContext(Dispatchers.IO) { Pdf.unlock(ctx, file, out, pw) }
+                        app.showResult(out)
+                    } catch (e: Exception) {
+                        out.delete()
+                        val bad = e.javaClass.simpleName.contains("Password", true) ||
+                            (e.message ?: "").contains("password", true)
+                        app.toast(if (bad) "Mot de passe incorrect" else "Erreur : ${e.message ?: e.javaClass.simpleName}")
+                    }
+                }
+            }
+        ) { Text("Déverrouiller") }
+    }
+}
+
+// ---------------------------------------------------------------- Tampons : filigrane, numéros, date, texte
+
+@Composable
+fun StampsWork(app: AppState, file: File) {
+    val ctx = app.ctx
+    var mode by remember { mutableIntStateOf(0) }
+    val modes = listOf("Filigrane", "Numéros de page", "Date et heure", "En-tête / pied")
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            for (i in modes.indices) {
+                FilterChip(selected = mode == i, onClick = { mode = i }, label = { Text(modes[i]) })
+            }
+        }
+        Box(Modifier.weight(1f)) {
+            when (mode) {
+                0 -> WatermarkWork(app, file)
+                1 -> StampTextWork(app, file, 1)
+                2 -> StampTextWork(app, file, 2)
+                else -> StampTextWork(app, file, 3)
+            }
+        }
+    }
+}
+
+@Composable
+fun StampTextWork(app: AppState, file: File, kind: Int) {
+    val ctx = app.ctx
+    var format by remember { mutableIntStateOf(1) }
+    var horizontal by remember { mutableIntStateOf(1) }
+    var vertical by remember { mutableIntStateOf(0) }
+    var custom by remember { mutableStateOf("") }
+    val formats = listOf("1", "1 / N", "Page 1 sur N")
+    val hNames = listOf("Gauche", "Centre", "Droite")
+    val vNames = listOf("En bas", "En haut")
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        when (kind) {
+            1 -> {
+                Text("Format du numéro :")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (i in formats.indices) {
+                        FilterChip(selected = format == i, onClick = { format = i }, label = { Text(formats[i]) })
+                    }
+                }
+            }
+            2 -> Text("La date et l'heure d'aujourd'hui seront écrites sur chaque page.")
+            else -> {
+                Text("Texte écrit sur chaque page (par exemple le nom du dossier) :")
+                OutlinedTextField(
+                    value = custom, onValueChange = { custom = it },
+                    label = { Text("Texte") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+        Text("Position :")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (i in vNames.indices) {
+                FilterChip(selected = vertical == i, onClick = { vertical = i }, label = { Text(vNames[i]) })
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (i in hNames.indices) {
+                FilterChip(selected = horizontal == i, onClick = { horizontal = i }, label = { Text(hNames[i]) })
+            }
+        }
+        Button(
+            enabled = kind != 3 || custom.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+            onClick = {
+                app.task("Ajout du texte…") {
+                    val out = Lib.derived(ctx, file, "tampon")
+                    val now = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.getDefault())
+                        .format(java.util.Date())
+                    val fmt = format
+                    val txt = custom.trim()
+                    withContext(Dispatchers.IO) {
+                        Pdf.stampText(ctx, file, out, horizontal, vertical) { n, total ->
+                            when (kind) {
+                                1 -> when (fmt) {
+                                    0 -> "$n"
+                                    1 -> "$n / $total"
+                                    else -> "Page $n sur $total"
+                                }
+                                2 -> now
+                                else -> txt
+                            }
+                        }
+                    }
+                    app.showResult(out)
+                }
+            }
+        ) { Text("Appliquer sur toutes les pages") }
     }
 }

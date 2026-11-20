@@ -54,9 +54,31 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun ZoomTheme(content: @Composable () -> Unit) {
     val colors = if (isSystemInDarkTheme()) {
-        darkColorScheme(primary = Color(0xFF19C39A), onPrimary = Color(0xFF00382B))
+        darkColorScheme(
+            primary = Color(0xFF34D399),
+            onPrimary = Color(0xFF04231A),
+            background = Color(0xFF0B1210),
+            onBackground = Color(0xFFEAF3EE),
+            surface = Color(0xFF0B1210),
+            onSurface = Color(0xFFEAF3EE),
+            surfaceVariant = Color(0xFF1E2B25),
+            onSurfaceVariant = Color(0xFF9FB3A9),
+            surfaceContainerLowest = Color(0xFF0B1210),
+            surfaceContainerLow = Color(0xFF131C18),
+            surfaceContainer = Color(0xFF101815),
+            surfaceContainerHigh = Color(0xFF1A2621),
+            surfaceContainerHighest = Color(0xFF22302A),
+            secondaryContainer = Color(0xFF1F3B30),
+            onSecondaryContainer = Color(0xFFEAF3EE),
+            outline = Color(0xFF4A5E55),
+            outlineVariant = Color(0xFF2E3F38)
+        )
     } else {
-        lightColorScheme(primary = Color(0xFF0E9F6E))
+        lightColorScheme(
+            primary = Color(0xFF0E9F6E),
+            surfaceContainerLow = Color(0xFFF1F5F3),
+            surfaceContainer = Color(0xFFEAF0ED)
+        )
     }
     MaterialTheme(colorScheme = colors, content = content)
 }
@@ -66,6 +88,7 @@ class AppState(val ctx: Context, private val scope: CoroutineScope) {
     val stack = mutableStateListOf<Screen>(Screen.Home)
     var busy by mutableStateOf<String?>(null)
     var refresh by mutableIntStateOf(0)
+    var homeTab by mutableIntStateOf(0)
 
     fun push(s: Screen) {
         stack.add(s)
@@ -122,6 +145,14 @@ fun Root() {
                         is Screen.Viewer -> ViewerScreen(app, s.file)
                         is Screen.Pick -> PickScreen(app, s.tool)
                         is Screen.Work -> WorkScreen(app, s.tool, s.files)
+                        is Screen.ScanModes -> ScanModesScreen(app)
+                        is Screen.QrCreate -> QrCreateScreen(app)
+                        is Screen.ImagesTool -> ImagesScreen(app)
+                        is Screen.Settings -> SettingsScreen(app)
+                        is Screen.Favorites -> FavoritesScreen(app)
+                        is Screen.Folders -> FoldersScreen(app)
+                        is Screen.Folder -> FolderScreen(app, s.name)
+                        is Screen.Trash -> TrashScreen(app)
                     }
                     val msg = app.busy
                     if (msg != null) BusyOverlay(msg)

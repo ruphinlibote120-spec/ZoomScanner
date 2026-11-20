@@ -16,6 +16,8 @@ android {
         val run = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionCode = run
         versionName = "1.0.$run"
+        // Une seule bibliothèque native par processeur courant : APK plus léger.
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     signingConfigs {
@@ -75,4 +77,6 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.1")
     // Manipulation de PDF (fusion, extraction, mot de passe, filigrane, signature)
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    // Création de QR codes (hors ligne)
+    implementation("com.google.zxing:core:3.5.3")
 }

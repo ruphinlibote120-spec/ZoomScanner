@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
@@ -128,5 +130,28 @@ object Img {
             }
         }
         return bmp
+    }
+
+    /** Moitié gauche ou droite d'une image (mode « Livre » : une double page devient deux pages). */
+    fun half(src: Bitmap, left: Boolean): Bitmap {
+        val w = src.width / 2
+        return Bitmap.createBitmap(src, if (left) 0 else w, 0, w, src.height)
+    }
+
+    /** Éclaircit le fond et renforce le texte (mode « Tableau blanc »). */
+    fun whiteboard(src: Bitmap): Bitmap {
+        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        val cm = ColorMatrix(
+            floatArrayOf(
+                1.8f, 0f, 0f, 0f, -105f,
+                0f, 1.8f, 0f, 0f, -105f,
+                0f, 0f, 1.8f, 0f, -105f,
+                0f, 0f, 0f, 1f, 0f
+            )
+        )
+        val p = Paint().apply { colorFilter = ColorMatrixColorFilter(cm) }
+        c.drawBitmap(src, 0f, 0f, p)
+        return out
     }
 }
